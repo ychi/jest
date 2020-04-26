@@ -25,7 +25,9 @@ import slash = require('slash');
 import {sync as writeFileAtomic} from 'write-file-atomic';
 import {addHook} from 'pirates';
 import type {
+  AsyncTransformer,
   Options,
+  SyncTransformer,
   TransformResult,
   TransformedSource,
   Transformer,
@@ -90,27 +92,16 @@ export default class ScriptTransformer {
     this._cache = projectCache;
   }
 
-  private _getCacheKey(
+  private _buildCacheKeyFromFileInfo(
     fileData: string,
     filename: Config.Path,
     instrument: boolean,
-    supportsDynamicImport: boolean,
-    supportsStaticESM: boolean,
+    configString: string,
+    transformerCacheKey?: string,
   ): string {
-    const configString = this._cache.configString;
-    const transformer = this._getTransformer(filename);
-
-    if (transformer && typeof transformer.getCacheKey === 'function') {
+    if (transformerCacheKey) {
       return createHash('md5')
-        .update(
-          transformer.getCacheKey(fileData, filename, configString, {
-            config: this._config,
-            instrument,
-            rootDir: this._config.rootDir,
-            supportsDynamicImport,
-            supportsStaticESM,
-          }),
-        )
+        .update(transformerCacheKey)
         .update(CACHE_VERSION)
         .digest('hex');
     } else {
@@ -124,24 +115,82 @@ export default class ScriptTransformer {
     }
   }
 
-  private _getFileCachePath(
-    filename: Config.Path,
+  private _getCacheKey(
     content: string,
+    filename: Config.Path,
     instrument: boolean,
     supportsDynamicImport: boolean,
     supportsStaticESM: boolean,
-  ): Config.Path {
+  ): string {
+    const configString = this._cache.configString;
+    const transformer = this._getTransformer(filename);
+    let transformerCacheKey = undefined;
+
+    if (transformer && typeof transformer.getCacheKey === 'function') {
+      transformerCacheKey = transformer.getCacheKey(
+        content,
+        filename,
+        configString,
+        {
+          config: this._config,
+          instrument,
+          rootDir: this._config.rootDir,
+          supportsDynamicImport,
+          supportsStaticESM,
+        },
+      );
+    }
+    return this._buildCacheKeyFromFileInfo(
+      content,
+      filename,
+      instrument,
+      configString,
+      transformerCacheKey,
+    );
+  }
+
+  private async _getCacheKeyAsync(
+    content: string,
+    filename: Config.Path,
+    instrument: boolean,
+    supportsDynamicImport: boolean,
+    supportsStaticESM: boolean,
+  ): Promise<string> {
+    const configString = this._cache.configString;
+    const transformer = await this._getTransformerAsync(filename);
+    let transformerCacheKey = undefined;
+
+    if (transformer && typeof transformer.getCacheKeyAsync === 'function') {
+      transformerCacheKey = await transformer.getCacheKeyAsync(
+        content,
+        filename,
+        configString,
+        {
+          config: this._config,
+          instrument,
+          rootDir: this._config.rootDir,
+          supportsDynamicImport,
+          supportsStaticESM,
+        },
+      );
+    }
+    return this._buildCacheKeyFromFileInfo(
+      content,
+      filename,
+      instrument,
+      configString,
+      transformerCacheKey,
+    );
+  }
+
+  private _createFolderFromCacheKey(
+    filename: Config.Path,
+    cacheKey: string,
+  ): string {
     const baseCacheDir = HasteMap.getCacheFilePath(
       this._config.cacheDirectory,
       'jest-transform-cache-' + this._config.name,
       VERSION,
-    );
-    const cacheKey = this._getCacheKey(
-      content,
-      filename,
-      instrument,
-      supportsDynamicImport,
-      supportsStaticESM,
     );
     // Create sub folders based on the cacheKey to avoid creating one
     // directory with many files.
@@ -155,6 +204,42 @@ export default class ScriptTransformer {
     createDirectory(cacheDir);
 
     return cachePath;
+  }
+
+  private _getFileCachePath(
+    filename: Config.Path,
+    content: string,
+    instrument: boolean,
+    supportsDynamicImport: boolean,
+    supportsStaticESM: boolean,
+  ): Config.Path {
+    const cacheKey = this._getCacheKey(
+      content,
+      filename,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+    );
+
+    return this._createFolderFromCacheKey(filename, cacheKey);
+  }
+
+  private async _getFileCachePathAsync(
+    filename: Config.Path,
+    content: string,
+    instrument: boolean,
+    supportsDynamicImport: boolean,
+    supportsStaticESM: boolean,
+  ): Promise<Config.Path> {
+    const cacheKey = await this._getCacheKeyAsync(
+      content,
+      filename,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+    );
+
+    return this._createFolderFromCacheKey(filename, cacheKey);
   }
 
   private _getTransformPath(filename: Config.Path) {
@@ -175,6 +260,41 @@ export default class ScriptTransformer {
     return undefined;
   }
 
+  private async _getTransformerAsync(filename: Config.Path) {
+    let transform: AsyncTransformer | null = null;
+    if (!this._config.transform || !this._config.transform.length) {
+      return null;
+    }
+
+    const transformPath = this._getTransformPath(filename);
+    if (transformPath) {
+      const transformer = this._transformCache.get(transformPath);
+      if (transformer != null) {
+        return transformer;
+      }
+
+      transform = require(transformPath);
+
+      if (!transform) {
+        throw new TypeError('Jest: a transform must export something.');
+      }
+      const transformerConfig = this._transformConfigCache.get(transformPath);
+      if (typeof transform.createTransformer === 'function') {
+        transform = transform.createTransformer(transformerConfig);
+      }
+      if (
+        typeof transform.process !== 'function' &&
+        typeof transform.processAsync !== 'function'
+      ) {
+        throw new TypeError(
+          'Jest: a transform must export a `process` or `processAsync` function.',
+        );
+      }
+      this._transformCache.set(transformPath, transform);
+    }
+    return transform;
+  }
+
   private _getTransformer(filename: Config.Path) {
     if (!this._config.transform || !this._config.transform.length) {
       return null;
@@ -191,7 +311,7 @@ export default class ScriptTransformer {
       return transformer;
     }
 
-    let transform: Transformer = require(transformPath);
+    let transform: SyncTransformer = require(transformPath);
 
     if (!transform) {
       throw new TypeError('Jest: a transform must export something.');
@@ -260,58 +380,29 @@ export default class ScriptTransformer {
     this._getTransformer(filepath);
   }
 
-  // TODO: replace third argument with TransformOptions in Jest 26
-  transformSource(
-    filepath: Config.Path,
+  private _buildTransformResult(
+    filename: string,
+    cacheFilePath: string,
     content: string,
+    transform: Transformer | null,
+    shouldCallTransform: boolean | null | undefined,
     instrument: boolean,
-    supportsDynamicImport = false,
-    supportsStaticESM = false,
+    supportsDynamicImport: boolean,
+    supportsStaticESM: boolean,
+    processed: TransformedSource | null,
+    sourceMapPath: Config.Path | null,
   ): TransformResult {
-    const filename = tryRealpath(filepath);
-    const transform = this._getTransformer(filename);
-    const cacheFilePath = this._getFileCachePath(
-      filename,
-      content,
-      instrument,
-      supportsDynamicImport,
-      supportsStaticESM,
-    );
-    let sourceMapPath: Config.Path | null = cacheFilePath + '.map';
-    // Ignore cache if `config.cache` is set (--no-cache)
-    let code = this._config.cache ? readCodeCacheFile(cacheFilePath) : null;
-
-    const shouldCallTransform = transform && this.shouldTransform(filename);
+    let transformed: TransformedSource = {
+      code: content,
+      map: null,
+    };
 
     // That means that the transform has a custom instrumentation
     // logic and will handle it based on `config.collectCoverage` option
     const transformWillInstrument =
       shouldCallTransform && transform && transform.canInstrument;
 
-    if (code) {
-      // This is broken: we return the code, and a path for the source map
-      // directly from the cache. But, nothing ensures the source map actually
-      // matches that source code. They could have gotten out-of-sync in case
-      // two separate processes write concurrently to the same cache files.
-      return {
-        code,
-        originalCode: content,
-        sourceMapPath,
-      };
-    }
-
-    let transformed: TransformedSource = {
-      code: content,
-      map: null,
-    };
-
     if (transform && shouldCallTransform) {
-      const processed = transform.process(content, filename, this._config, {
-        instrument,
-        supportsDynamicImport,
-        supportsStaticESM,
-      });
-
       if (typeof processed === 'string') {
         transformed.code = processed;
       } else if (processed != null && typeof processed.code === 'string') {
@@ -344,6 +435,7 @@ export default class ScriptTransformer {
 
     // Apply instrumentation to the code if necessary, keeping the instrumented code and new map
     let map = transformed.map;
+    let code;
     if (!transformWillInstrument && instrument) {
       /**
        * We can map the original source code to the instrumented code ONLY if
@@ -375,6 +467,9 @@ export default class ScriptTransformer {
     if (map) {
       const sourceMapContent =
         typeof map === 'string' ? map : JSON.stringify(map);
+
+      invariant(sourceMapPath, 'We should always have default sourceMapPath');
+
       writeCacheFile(sourceMapPath, sourceMapContent);
     } else {
       sourceMapPath = null;
@@ -387,6 +482,212 @@ export default class ScriptTransformer {
       originalCode: content,
       sourceMapPath,
     };
+  }
+
+  // TODO: replace third argument with TransformOptions in Jest 26
+  transformSource(
+    filepath: Config.Path,
+    content: string,
+    instrument: boolean,
+    supportsDynamicImport = false,
+    supportsStaticESM = false,
+  ): TransformResult {
+    const filename = tryRealpath(filepath);
+    const transform = this._getTransformer(filename);
+    const cacheFilePath = this._getFileCachePath(
+      filename,
+      content,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+    );
+    const sourceMapPath: Config.Path | null = cacheFilePath + '.map';
+    // Ignore cache if `config.cache` is set (--no-cache)
+    const code = this._config.cache ? readCodeCacheFile(cacheFilePath) : null;
+
+    const shouldCallTransform = transform && this.shouldTransform(filename);
+
+    if (code) {
+      // This is broken: we return the code, and a path for the source map
+      // directly from the cache. But, nothing ensures the source map actually
+      // matches that source code. They could have gotten out-of-sync in case
+      // two separate processes write concurrently to the same cache files.
+      return {
+        code,
+        originalCode: content,
+        sourceMapPath,
+      };
+    }
+
+    let processed: TransformedSource | null = null;
+
+    if (transform && shouldCallTransform) {
+      if (typeof transform.process !== 'function') {
+        throw new TypeError(
+          'Jest: a synchronous transform mus export a `process` function.',
+        );
+      }
+
+      processed = transform.process(content, filename, this._config, {
+        instrument,
+        supportsDynamicImport,
+        supportsStaticESM,
+      });
+
+      if (
+        processed == null ||
+        (typeof processed !== 'string' && typeof processed.code !== 'string')
+      ) {
+        throw new TypeError(
+          "Jest: a transform's `process` function must return a string, " +
+            'or an object with `code` key containing this string.',
+        );
+      }
+    }
+
+    return this._buildTransformResult(
+      filename,
+      cacheFilePath,
+      content,
+      transform,
+      shouldCallTransform,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+      processed,
+      sourceMapPath,
+    );
+  }
+
+  // TODO: replace third argument with TransformOptions in Jest 26
+  async transformSourceAsync(
+    filepath: Config.Path,
+    content: string,
+    instrument: boolean,
+    supportsDynamicImport = false,
+    supportsStaticESM = false,
+  ): Promise<TransformResult> {
+    const filename = tryRealpath(filepath);
+    const transform = await this._getTransformerAsync(filename);
+    const cacheFilePath = await this._getFileCachePathAsync(
+      filename,
+      content,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+    );
+    const sourceMapPath: Config.Path | null = cacheFilePath + '.map';
+    // Ignore cache if `config.cache` is set (--no-cache)
+    const code = this._config.cache ? readCodeCacheFile(cacheFilePath) : null;
+
+    const shouldCallTransform = transform && this.shouldTransform(filename);
+
+    if (code) {
+      // This is broken: we return the code, and a path for the source map
+      // directly from the cache. But, nothing ensures the source map actually
+      // matches that source code. They could have gotten out-of-sync in case
+      // two separate processes write concurrently to the same cache files.
+      return {
+        code,
+        originalCode: content,
+        sourceMapPath,
+      };
+    }
+
+    let processed: TransformedSource | null = null;
+
+    if (transform && shouldCallTransform) {
+      if (transform.processAsync) {
+        processed = await transform.processAsync(
+          content,
+          filename,
+          this._config,
+          {
+            instrument,
+            supportsDynamicImport,
+            supportsStaticESM,
+          },
+        );
+      } else if (transform.process) {
+        processed = transform.process(content, filename, this._config, {
+          instrument,
+          supportsDynamicImport,
+          supportsStaticESM,
+        });
+      }
+
+      if (
+        processed == null ||
+        (typeof processed !== 'string' && typeof processed.code !== 'string')
+      ) {
+        throw new TypeError(
+          "Jest: a transform's `process` function must return a string, " +
+            'or an object with `code` key containing this string. ' +
+            "It's `processAsync` function must return that in a promise.",
+        );
+      }
+    }
+
+    return this._buildTransformResult(
+      filename,
+      cacheFilePath,
+      content,
+      transform,
+      shouldCallTransform,
+      instrument,
+      supportsDynamicImport,
+      supportsStaticESM,
+      processed,
+      sourceMapPath,
+    );
+  }
+
+  private async _transformAndBuildScriptAsync(
+    filename: Config.Path,
+    options: Options,
+    instrument: boolean,
+    fileSource?: string,
+  ): Promise<TransformResult> {
+    const {
+      isCoreModule,
+      isInternalModule,
+      supportsDynamicImport,
+      supportsStaticESM,
+    } = options;
+    const content = stripShebang(
+      fileSource || fs.readFileSync(filename, 'utf8'),
+    );
+
+    let code = content;
+    let sourceMapPath: string | null = null;
+
+    const willTransform =
+      !isInternalModule &&
+      !isCoreModule &&
+      (this.shouldTransform(filename) || instrument);
+
+    try {
+      if (willTransform) {
+        const transformedSource = await this.transformSourceAsync(
+          filename,
+          content,
+          instrument,
+          supportsDynamicImport,
+          supportsStaticESM,
+        );
+
+        code = transformedSource.code;
+        sourceMapPath = transformedSource.sourceMapPath;
+      }
+
+      return {
+        code,
+        originalCode: content,
+        sourceMapPath,
+      };
+    } catch (e) {
+      throw handlePotentialSyntaxError(e);
+    }
   }
 
   private _transformAndBuildScript(
@@ -435,6 +736,39 @@ export default class ScriptTransformer {
     } catch (e) {
       throw handlePotentialSyntaxError(e);
     }
+  }
+
+  async transformAsync(
+    filename: Config.Path,
+    options: Options,
+    fileSource?: string,
+  ): Promise<TransformResult> {
+    let scriptCacheKey = undefined;
+    let instrument = false;
+
+    if (!options.isCoreModule) {
+      instrument =
+        options.coverageProvider === 'babel' &&
+        shouldInstrument(filename, options, this._config);
+      scriptCacheKey = getScriptCacheKey(filename, instrument);
+      const result = this._cache.transformedFiles.get(scriptCacheKey);
+      if (result) {
+        return result;
+      }
+    }
+
+    const result = await this._transformAndBuildScriptAsync(
+      filename,
+      options,
+      instrument,
+      fileSource,
+    );
+
+    if (scriptCacheKey) {
+      this._cache.transformedFiles.set(scriptCacheKey, result);
+    }
+
+    return result;
   }
 
   transform(
@@ -747,3 +1081,9 @@ const calcTransformRegExp = (config: Config.ProjectConfig) => {
 
   return transformRegexp;
 };
+
+function invariant(condition: unknown, message?: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
