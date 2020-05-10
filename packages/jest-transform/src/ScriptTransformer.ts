@@ -273,7 +273,7 @@ export default class ScriptTransformer {
         return transformer;
       }
 
-      transform = require(transformPath);
+      transform = await import(transformPath);
 
       if (!transform) {
         throw new TypeError('Jest: a transform must export something.');
