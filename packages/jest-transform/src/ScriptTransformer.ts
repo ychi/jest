@@ -43,7 +43,6 @@ type ProjectCache = {
   transformedFiles: Map<string, TransformResult>;
 };
 
-
 // This data structure is used to avoid recalculating some data every time that
 // we need to transform a file. Since ScriptTransformer is instantiated for each
 // file we need to keep this object in the local scope of this module.
