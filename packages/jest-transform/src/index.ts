@@ -13,6 +13,8 @@ export {default as shouldInstrument} from './shouldInstrument';
 export type {
   CacheKeyOptions,
   Transformer,
+  SyncTransformer,
+  AsyncTransformer,
   ShouldInstrumentOptions,
   Options as TransformationOptions,
   TransformOptions,

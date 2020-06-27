@@ -24,7 +24,7 @@ const evalCommand: repl.REPLEval = (
 ) => {
   let result;
   try {
-    if (transformer) {
+    if (transformer && transformer.process) {
       const transformResult = transformer.process(
         cmd,
         jestGlobalConfig.replname || 'jest.js',
