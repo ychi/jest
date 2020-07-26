@@ -271,7 +271,7 @@ export default class ScriptTransformer {
         return transformer;
       }
 
-      transform = await import(transformPath);
+      transform = await import(transformPath).catch(console.log);
 
       if (!transform) {
         throw new TypeError('Jest: a transform must export something.');
@@ -672,7 +672,7 @@ export default class ScriptTransformer {
           instrument,
           supportsDynamicImport,
           supportsStaticESM,
-        );
+        ).catch(console.log);
 
         code = transformedSource.code;
         sourceMapPath = transformedSource.sourceMapPath;
@@ -684,6 +684,7 @@ export default class ScriptTransformer {
         sourceMapPath,
       };
     } catch (e) {
+      console.log({error: e});
       throw handlePotentialSyntaxError(e);
     }
   }
@@ -755,18 +756,20 @@ export default class ScriptTransformer {
       }
     }
 
-    const result = await this._transformAndBuildScriptAsync(
-      filename,
-      options,
-      instrument,
-      fileSource,
-    );
+      const result = await this._transformAndBuildScriptAsync(
+        filename,
+        options,
+        instrument,
+        fileSource,
+      ).catch(e=>{
+        console.log({eno: e});
+      });
 
-    if (scriptCacheKey) {
-      this._cache.transformedFiles.set(scriptCacheKey, result);
-    }
-
-    return result;
+      if (scriptCacheKey) {
+        this._cache.transformedFiles.set(scriptCacheKey, result);
+      }
+  
+      return result;       
   }
 
   transform(

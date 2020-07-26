@@ -104,6 +104,14 @@ jest.mock(
   {virtual: true},
 );
 
+jest.mock(
+  'passthrough-async-preprocessor',
+  () => ({
+    processAsync: jest.fn(),
+  }),
+  {virtual: true},
+);
+
 // Bad preprocessor
 jest.mock('skipped-required-props-preprocessor', () => ({}), {virtual: true});
 
@@ -256,6 +264,50 @@ describe('ScriptTransformer', () => {
     );
   });
 
+  it('transforms a file async properly', async () => {
+    const scriptTransformer = new ScriptTransformer(config);
+    const transformedBananaWithCoverage = await scriptTransformer.transformAsync(
+      '/fruits/banana.js',
+      makeGlobalConfig({collectCoverage: true}),
+    );
+
+    expect(wrap(transformedBananaWithCoverage.code)).toMatchSnapshot();
+
+    // no-cache case
+    expect(fs.readFileSync).toHaveBeenCalledTimes(1);
+    expect(fs.readFileSync).toBeCalledWith('/fruits/banana.js', 'utf8');
+
+    // in-memory cache
+    const transformedBananaWithCoverageAgain = await scriptTransformer.transformAsync(
+      '/fruits/banana.js',
+      makeGlobalConfig({collectCoverage: true}),
+    );
+    expect(transformedBananaWithCoverageAgain).toBe(
+      transformedBananaWithCoverage,
+    );
+
+    const transformedKiwiWithCoverage = await scriptTransformer.transformAsync(
+      '/fruits/kiwi.js',
+      makeGlobalConfig({collectCoverage: true}),
+    );
+    expect(wrap(transformedKiwiWithCoverage.code)).toMatchSnapshot();
+
+    expect(transformedBananaWithCoverage.code).not.toEqual(
+      transformedKiwiWithCoverage.code,
+    );
+    expect(transformedBananaWithCoverage.code).not.toMatch(/instrumented kiwi/);
+
+    // If we disable coverage, we get a different result.
+    const transformedKiwiWithoutCoverage = await scriptTransformer.transformAsync(
+      '/fruits/kiwi.js',
+      makeGlobalConfig({collectCoverage: false}),
+    );
+
+    expect(transformedKiwiWithoutCoverage.code).not.toEqual(
+      transformedKiwiWithCoverage.code,
+    );
+  });
+
   it('does not transform Node core modules', () => {
     jest.mock('../shouldInstrument');
 
@@ -264,6 +316,25 @@ describe('ScriptTransformer', () => {
     const fsSourceCode = process.binding('natives').fs;
 
     const response = scriptTransformer.transform(
+      'fs',
+      {isCoreModule: true},
+      fsSourceCode,
+    );
+
+    expect(response.code).toEqual(fsSourceCode);
+
+    // Native files should never be transformed.
+    expect(shouldInstrument).toHaveBeenCalledTimes(0);
+  });
+
+  it('does not transform Node core modules when async transforming', async () => {
+    jest.mock('../shouldInstrument');
+
+    const shouldInstrument = require('../shouldInstrument').default;
+    const scriptTransformer = new ScriptTransformer(config);
+    const fsSourceCode = process.binding('natives').fs;
+
+    const response = await scriptTransformer.transformAsync(
       'fs',
       {isCoreModule: true},
       fsSourceCode,
@@ -312,6 +383,52 @@ describe('ScriptTransformer', () => {
         expect(() => scriptTransformer.transform(filePath, {})).not.toThrow();
       });
     },
+  );
+
+  it(
+    "throws an error if `processAsync` doesn't return a promise of string or" +
+      'object containing `code` key with processed string',
+    () => {
+      config = {
+        ...config,
+        transform: [['^.+\\.js$', 'passthrough-async-preprocessor']],
+      };
+      const scriptTransformer = new ScriptTransformer(config);
+
+      const incorrectReturnValues = [
+        [undefined, '/fruits/banana.js'],
+        [{a: 'a'}, '/fruits/kiwi.js'],
+        [[], '/fruits/grapefruit.js'],
+      ];
+
+      incorrectReturnValues.forEach(async ([returnValue, filePath]) => {
+        require('passthrough-async-preprocessor').processAsync
+        .mockImplementation((returnValue)=> {
+          console.log({"inside_processAsync": returnValue});
+          return Promise.resolve(returnValue);
+        }
+          
+        );
+         await scriptTransformer.transformAsync(filePath, {})
+         .catch((e)=>{
+           expect(e.message).toMatch('error');
+         });
+      });
+/*
+      const correctReturnValues = [
+        ['code', '/fruits/banana.js'],
+        [{code: 'code'}, '/fruits/kiwi.js'],
+      ];
+
+      correctReturnValues.forEach(async ([returnValue, filePath]) => {
+        require('passthrough-preprocessor').process.mockReturnValue(
+          returnValue,
+        );
+        await expect(() => scriptTransformer.transformAsync(filePath, {}))
+        .resolves;
+      });
+      */
+    }
   );
 
   it("throws an error if `process` doesn't defined", () => {
