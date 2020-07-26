@@ -756,20 +756,20 @@ export default class ScriptTransformer {
       }
     }
 
-      const result = await this._transformAndBuildScriptAsync(
-        filename,
-        options,
-        instrument,
-        fileSource,
-      ).catch(e=>{
-        console.log({eno: e});
-      });
+    const result = await this._transformAndBuildScriptAsync(
+      filename,
+      options,
+      instrument,
+      fileSource,
+    ).catch(e => {
+      console.log({eno: e});
+    });
 
-      if (scriptCacheKey) {
-        this._cache.transformedFiles.set(scriptCacheKey, result);
-      }
-  
-      return result;       
+    if (scriptCacheKey) {
+      this._cache.transformedFiles.set(scriptCacheKey, result);
+    }
+
+    return result;
   }
 
   transform(

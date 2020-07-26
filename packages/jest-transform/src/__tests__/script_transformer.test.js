@@ -402,19 +402,17 @@ describe('ScriptTransformer', () => {
       ];
 
       incorrectReturnValues.forEach(async ([returnValue, filePath]) => {
-        require('passthrough-async-preprocessor').processAsync
-        .mockImplementation((returnValue)=> {
-          console.log({"inside_processAsync": returnValue});
-          return Promise.resolve(returnValue);
-        }
-          
+        require('passthrough-async-preprocessor').processAsync.mockImplementation(
+          returnValue => {
+            console.log({inside_processAsync: returnValue});
+            return Promise.resolve(returnValue);
+          },
         );
-         await scriptTransformer.transformAsync(filePath, {})
-         .catch((e)=>{
-           expect(e.message).toMatch('error');
-         });
+        await scriptTransformer.transformAsync(filePath, {}).catch(e => {
+          expect(e.message).toMatch('error');
+        });
       });
-/*
+      /*
       const correctReturnValues = [
         ['code', '/fruits/banana.js'],
         [{code: 'code'}, '/fruits/kiwi.js'],
@@ -428,7 +426,7 @@ describe('ScriptTransformer', () => {
         .resolves;
       });
       */
-    }
+    },
   );
 
   it("throws an error if `process` doesn't defined", () => {
