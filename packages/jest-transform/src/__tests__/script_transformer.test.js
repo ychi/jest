@@ -107,7 +107,9 @@ jest.mock(
 jest.mock(
   'passthrough-async-preprocessor',
   () => ({
-    processAsync: jest.fn(),
+
+      processAsync: jest.fn(),
+  
   }),
   {virtual: true},
 );
@@ -396,19 +398,21 @@ describe('ScriptTransformer', () => {
       const scriptTransformer = new ScriptTransformer(config);
 
       const incorrectReturnValues = [
-        [undefined, '/fruits/banana.js'],
+        [undefined, '/fruits/banana.js'], 
         [{a: 'a'}, '/fruits/kiwi.js'],
-        [[], '/fruits/grapefruit.js'],
+       /* [[], '/fruits/grapefruit.js'], */
       ];
 
       incorrectReturnValues.forEach(async ([returnValue, filePath]) => {
-        require('passthrough-async-preprocessor').processAsync.mockImplementation(
+        let transformer= require('passthrough-async-preprocessor');
+        transformer.processAsync.mockImplementation(
           returnValue => {
             console.log({inside_processAsync: returnValue});
             return Promise.resolve(returnValue);
           },
         );
-        await scriptTransformer.transformAsync(filePath, {}).catch(e => {
+       
+        return scriptTransformer.transformAsync(filePath, {}).catch(e => {
           expect(e.message).toMatch('error');
         });
       });
