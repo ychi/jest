@@ -107,9 +107,7 @@ jest.mock(
 jest.mock(
   'passthrough-async-preprocessor',
   () => ({
-
       processAsync: jest.fn(),
-  
   }),
   {virtual: true},
 );
@@ -398,38 +396,27 @@ describe('ScriptTransformer', () => {
       const scriptTransformer = new ScriptTransformer(config);
 
       const incorrectReturnValues = [
-        [undefined, '/fruits/banana.js'], 
+        [undefined, '/fruits/banana.js'],
         [{a: 'a'}, '/fruits/kiwi.js'],
-       /* [[], '/fruits/grapefruit.js'], */
+        [[], '/fruits/grapefruit.js'],
       ];
 
-      incorrectReturnValues.forEach(async ([returnValue, filePath]) => {
+      const promises = incorrectReturnValues.map(async ([returnValue, filePath]) => {
         let transformer= require('passthrough-async-preprocessor');
-        transformer.processAsync.mockImplementation(
-          returnValue => {
-            console.log({inside_processAsync: returnValue});
-            return Promise.resolve(returnValue);
-          },
-        );
-       
-        return scriptTransformer.transformAsync(filePath, {}).catch(e => {
-          expect(e.message).toMatch('error');
+         
+        transformer.processAsync.mockResolvedValue(returnValue);
+        console.log(await transformer.processAsync());
+        return await scriptTransformer.transformAsync(filePath, {})
+        .then( res => {
+         console.log(res);
+        })
+        .catch( e => {
+          expect(e.message).toMatch("must return a string");
         });
+        
       });
-      /*
-      const correctReturnValues = [
-        ['code', '/fruits/banana.js'],
-        [{code: 'code'}, '/fruits/kiwi.js'],
-      ];
 
-      correctReturnValues.forEach(async ([returnValue, filePath]) => {
-        require('passthrough-preprocessor').process.mockReturnValue(
-          returnValue,
-        );
-        await expect(() => scriptTransformer.transformAsync(filePath, {}))
-        .resolves;
-      });
-      */
+      return Promise.all(promises);
     },
   );
 

@@ -271,8 +271,10 @@ export default class ScriptTransformer {
         return transformer;
       }
 
+      console.log({transformPath: transformPath});
       transform = await import(transformPath).catch(console.log);
-
+      //@ts-ignore
+      console.log({transPath: transformPath, resolved: await transform?.processAsync('hi', 'low', )});
       if (!transform) {
         throw new TypeError('Jest: a transform must export something.');
       }
@@ -620,8 +622,9 @@ export default class ScriptTransformer {
       ) {
         throw new TypeError(
           "Jest: a transform's `process` function must return a string, " +
-            'or an object with `code` key containing this string. ' +
-            "It's `processAsync` function must return that in a promise.",
+            'or an object with `code` key containing this string. \n' +
+            'If a transform has a `processAsync` function, it must return ' +
+            'the result in a promise.',
         );
       }
     }
@@ -672,7 +675,7 @@ export default class ScriptTransformer {
           instrument,
           supportsDynamicImport,
           supportsStaticESM,
-        ).catch(console.log);
+        );
 
         code = transformedSource.code;
         sourceMapPath = transformedSource.sourceMapPath;
@@ -684,7 +687,6 @@ export default class ScriptTransformer {
         sourceMapPath,
       };
     } catch (e) {
-      console.log({error: e});
       throw handlePotentialSyntaxError(e);
     }
   }
@@ -761,9 +763,7 @@ export default class ScriptTransformer {
       options,
       instrument,
       fileSource,
-    ).catch(e => {
-      console.log({eno: e});
-    });
+    );
 
     if (scriptCacheKey) {
       this._cache.transformedFiles.set(scriptCacheKey, result);

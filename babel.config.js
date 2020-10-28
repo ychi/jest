@@ -42,7 +42,6 @@ module.exports = {
       ],
       test: [
         'packages/jest-config/src/readConfigFileAndSetRootDir.ts',
-        'packages/jest-transform/src/ScriptTransformer.ts',
       ],
     },
   ],
