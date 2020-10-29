@@ -35,5 +35,5 @@ jobs:
       - name: Run Jest
         uses: stefanoeb/jest-action@1.0.4
         with:
-          jestArg: script_transformer 
+          jestArgs: script_transformer 
 
