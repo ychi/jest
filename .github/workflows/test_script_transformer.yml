@@ -31,7 +31,9 @@ jobs:
         uses: actions/setup-node@v1
         with: 
           node-version: ${{ matrix.node-version }}  
-      - run: yarn global add jest
       - run: yarn
-      - run: jest script_transformer
+      - name: Run Jest
+        uses: stefanoeb/jest-action@1.0.4
+        with:
+          jestArg: script_transformer 
 
