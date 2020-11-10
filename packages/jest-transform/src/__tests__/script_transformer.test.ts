@@ -446,6 +446,7 @@ describe('ScriptTransformer', () => {
         incorrectReturnValues.length + correctReturnValues.length,
       );
 
+
       const promisesToReject = [];
       // incorrectReturnValues
       //   .map(buildPromise)
@@ -459,6 +460,7 @@ describe('ScriptTransformer', () => {
         .map(promise => expect(promise).resolves.toHaveProperty('code'));
 
       await Promise.all([...promisesToReject, ...promisesToResolve]);
+
     },
   );
 
